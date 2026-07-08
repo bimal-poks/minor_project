@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Node
+node_modules/
+frontend/dist/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+db.sqlite3
+
+# Dataset (biometric data — never commit)
+face_module/dataset/
+face_module/embeddings/
