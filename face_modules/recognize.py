@@ -1,9 +1,14 @@
 import cv2
 import pickle
 import numpy as np
+import requests
+import time
 from insightface.app import FaceAnalysis
 
-THRESHOLD = 0.4  # similarity threshold - tune this based on testing
+THRESHOLD = 0.55
+SESSION_ID = 1
+API_URL = "http://127.0.0.1:8000/api/attendance/mark/"
+COOLDOWN_SECONDS = 10
 
 def load_model():
     app = FaceAnalysis(name='buffalo_l')
@@ -20,21 +25,31 @@ def cosine_similarity(a, b):
 def find_best_match(embedding, db):
     best_match = None
     best_score = -1
-
     for roll_number, stored_embedding in db.items():
         score = cosine_similarity(embedding, stored_embedding)
         if score > best_score:
             best_score = score
             best_match = roll_number
-
     if best_score >= THRESHOLD:
         return best_match, best_score
     return None, best_score
+
+def mark_attendance(roll_number):
+    try:
+        response = requests.post(API_URL, json={
+            "roll_number": roll_number,
+            "session_id": SESSION_ID
+        })
+        data = response.json()
+        print(f"API response: {data.get('message', data)}")
+    except requests.exceptions.ConnectionError:
+        print("Could not reach backend - is Django running?")
 
 def run_live_recognition():
     app = load_model()
     db = load_embeddings_db()
     cap = cv2.VideoCapture(0)
+    last_marked = {}
 
     print("Press 'q' to quit")
 
@@ -52,6 +67,10 @@ def run_live_recognition():
             if match:
                 label = f"{match} ({score:.2f})"
                 color = (0, 255, 0)
+                now = time.time()
+                if match not in last_marked or (now - last_marked[match]) > COOLDOWN_SECONDS:
+                    mark_attendance(match)
+                    last_marked[match] = now
             else:
                 label = f"Unknown ({score:.2f})"
                 color = (0, 0, 255)
@@ -60,7 +79,7 @@ def run_live_recognition():
             cv2.putText(frame, label, (box[0], box[1] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-        cv2.imshow("Live Recognition", frame)
+        cv2.imshow("Live Recognition + Attendance", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
