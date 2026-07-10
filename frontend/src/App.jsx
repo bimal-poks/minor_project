@@ -1,7 +1,9 @@
+import StudentManagement from './pages/StudentManagement';
+
 function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <h1 className="text-3xl font-bold">Smart Attendance System</h1>
+    <div className="min-h-screen bg-gray-50">
+      <StudentManagement />
     </div>
   );
 }
