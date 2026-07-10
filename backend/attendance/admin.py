@@ -1,3 +1,7 @@
 from django.contrib import admin
+from .models import Student, FaceEmbedding, Session, AttendanceRecord
 
-# Register your models here.
+admin.site.register(Student)
+admin.site.register(FaceEmbedding)
+admin.site.register(Session)
+admin.site.register(AttendanceRecord)
