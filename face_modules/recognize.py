@@ -10,10 +10,10 @@ THRESHOLD = 0.55
 SESSION_ID = 1
 API_URL = "http://127.0.0.1:8000/api/attendance/mark/"
 COOLDOWN_SECONDS = 10
-
-LIVENESS_WINDOW = 2.0      # seconds of tracking before deciding liveness
-MIN_MOVEMENT_PX = 2        # minimum bbox-center movement to count as "alive"
-MIN_SAMPLES = 8             # minimum frames needed before judging liveness
+LIVENESS_WINDOW = 2.0
+MIN_MOVEMENT_PX = 2
+MIN_SAMPLES = 8
+LIVENESS_LOCK_SECONDS = 5.0
 
 def load_model():
     app = FaceAnalysis(name='buffalo_l')
@@ -51,10 +51,8 @@ def mark_attendance(roll_number):
         print("Could not reach backend - is Django running?")
 
 def check_liveness(track_buffer):
-    """Returns True if enough natural movement is seen in the tracked positions."""
     if len(track_buffer) < MIN_SAMPLES:
         return False, 0
-
     xs = [p[0] for p in track_buffer]
     ys = [p[1] for p in track_buffer]
     movement = max(max(xs) - min(xs), max(ys) - min(ys))
@@ -66,7 +64,8 @@ def run_live_recognition():
     cap = cv2.VideoCapture(0)
 
     last_marked = {}
-    tracking = {}  # roll_number -> deque of (center_x, center_y, timestamp)
+    tracking = {}
+    liveness_confirmed = {}  # roll_number -> timestamp when liveness was confirmed
 
     print("Press 'q' to quit")
 
@@ -84,6 +83,7 @@ def run_live_recognition():
             match, score = find_best_match(face.embedding, db)
 
             if match:
+                # update tracking buffer
                 if match not in tracking:
                     tracking[match] = deque()
                 tracking[match].append((center[0], center[1], now))
@@ -92,21 +92,34 @@ def run_live_recognition():
                 while tracking[match] and now - tracking[match][0][2] > LIVENESS_WINDOW:
                     tracking[match].popleft()
 
-                is_live, movement = check_liveness(tracking[match])
+                # check if liveness was already confirmed recently
+                already_confirmed = (
+                    match in liveness_confirmed and
+                    now - liveness_confirmed[match] < LIVENESS_LOCK_SECONDS
+                )
 
-                if not is_live:
+                # run liveness check if not already confirmed
+                if not already_confirmed:
+                    is_live, movement = check_liveness(tracking[match])
+                    if is_live:
+                        liveness_confirmed[match] = now  # lock it in
+                        already_confirmed = True
+
+                if not already_confirmed:
                     label = f"{match} - verifying liveness..."
                     color = (0, 165, 255)  # orange
                 else:
                     label = f"{match} ({score:.2f}) LIVE"
-                    color = (0, 255, 0)
+                    color = (0, 255, 0)  # green
 
+                    # mark attendance if cooldown has passed
                     if match not in last_marked or (now - last_marked[match]) > COOLDOWN_SECONDS:
                         mark_attendance(match)
                         last_marked[match] = now
+
             else:
                 label = f"Unknown ({score:.2f})"
-                color = (0, 0, 255)
+                color = (0, 0, 255)  # red
 
             cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
             cv2.putText(frame, label, (box[0], box[1] - 10),
