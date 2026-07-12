@@ -3,12 +3,17 @@ import pickle
 import numpy as np
 import requests
 import time
+from collections import deque
 from insightface.app import FaceAnalysis
 
 THRESHOLD = 0.55
 SESSION_ID = 1
 API_URL = "http://127.0.0.1:8000/api/attendance/mark/"
 COOLDOWN_SECONDS = 10
+
+LIVENESS_WINDOW = 2.0      # seconds of tracking before deciding liveness
+MIN_MOVEMENT_PX = 2        # minimum bbox-center movement to count as "alive"
+MIN_SAMPLES = 8             # minimum frames needed before judging liveness
 
 def load_model():
     app = FaceAnalysis(name='buffalo_l')
@@ -45,11 +50,23 @@ def mark_attendance(roll_number):
     except requests.exceptions.ConnectionError:
         print("Could not reach backend - is Django running?")
 
+def check_liveness(track_buffer):
+    """Returns True if enough natural movement is seen in the tracked positions."""
+    if len(track_buffer) < MIN_SAMPLES:
+        return False, 0
+
+    xs = [p[0] for p in track_buffer]
+    ys = [p[1] for p in track_buffer]
+    movement = max(max(xs) - min(xs), max(ys) - min(ys))
+    return movement >= MIN_MOVEMENT_PX, movement
+
 def run_live_recognition():
     app = load_model()
     db = load_embeddings_db()
     cap = cv2.VideoCapture(0)
+
     last_marked = {}
+    tracking = {}  # roll_number -> deque of (center_x, center_y, timestamp)
 
     print("Press 'q' to quit")
 
@@ -59,25 +76,41 @@ def run_live_recognition():
             break
 
         faces = app.get(frame)
+        now = time.time()
 
         for face in faces:
             box = face.bbox.astype(int)
+            center = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
             match, score = find_best_match(face.embedding, db)
 
             if match:
-                label = f"{match} ({score:.2f})"
-                color = (0, 255, 0)
-                now = time.time()
-                if match not in last_marked or (now - last_marked[match]) > COOLDOWN_SECONDS:
-                    mark_attendance(match)
-                    last_marked[match] = now
+                if match not in tracking:
+                    tracking[match] = deque()
+                tracking[match].append((center[0], center[1], now))
+
+                # drop samples older than the liveness window
+                while tracking[match] and now - tracking[match][0][2] > LIVENESS_WINDOW:
+                    tracking[match].popleft()
+
+                is_live, movement = check_liveness(tracking[match])
+
+                if not is_live:
+                    label = f"{match} - verifying liveness..."
+                    color = (0, 165, 255)  # orange
+                else:
+                    label = f"{match} ({score:.2f}) LIVE"
+                    color = (0, 255, 0)
+
+                    if match not in last_marked or (now - last_marked[match]) > COOLDOWN_SECONDS:
+                        mark_attendance(match)
+                        last_marked[match] = now
             else:
                 label = f"Unknown ({score:.2f})"
                 color = (0, 0, 255)
 
             cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
             cv2.putText(frame, label, (box[0], box[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         cv2.imshow("Live Recognition + Attendance", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
