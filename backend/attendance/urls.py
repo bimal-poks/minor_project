@@ -8,4 +8,5 @@ urlpatterns = [
     path('attendance/mark/', views.mark_attendance, name='mark-attendance'),
     path('attendance/report/', views.attendance_report, name='attendance-report'),
     path('attendance/today/', views.today_summary, name='today-summary'),
+    path('attendance/export/', views.export_attendance_csv, name='export-csv'),
 ]

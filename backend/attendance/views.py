@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from django.utils import timezone
 from .models import Student, Session, AttendanceRecord
 from .serializers import StudentSerializer, SessionSerializer, AttendanceRecordSerializer
-
+import csv
+from django.http import HttpResponse
 
 class StudentListCreateView(generics.ListCreateAPIView):
     queryset = Student.objects.all()
@@ -89,3 +90,32 @@ def today_summary(request):
         "count": records.count(),
         "records": serializer.data
     })
+@api_view(['GET'])
+def export_attendance_csv(request):
+    session_id = request.query_params.get('session_id')
+    date = request.query_params.get('date')
+
+    records = AttendanceRecord.objects.select_related('student', 'session').all()
+
+    if session_id:
+        records = records.filter(session_id=session_id)
+    if date:
+        records = records.filter(session__date=date)
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="attendance_report.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(['Roll Number', 'Name', 'Session', 'Date', 'Time', 'Status'])
+
+    for record in records:
+        writer.writerow([
+            record.student.roll_number,
+            record.student.name,
+            record.session.name,
+            record.session.date,
+            record.timestamp.strftime('%H:%M:%S'),
+            record.status
+        ])
+
+    return response
