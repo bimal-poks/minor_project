@@ -6,6 +6,8 @@ from .models import Student, Session, AttendanceRecord
 from .serializers import StudentSerializer, SessionSerializer, AttendanceRecordSerializer
 import csv
 from django.http import HttpResponse
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
 
 class StudentListCreateView(generics.ListCreateAPIView):
     queryset = Student.objects.all()
@@ -119,3 +121,14 @@ def export_attendance_csv(request):
         ])
 
     return response
+@api_view(['POST'])
+def login_view(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    user = authenticate(username=username, password=password)
+    if user is None:
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    token, created = Token.objects.get_or_create(user=user)
+    return Response({"token": token.key, "username": user.username})
