@@ -3,17 +3,39 @@ import pickle
 import numpy as np
 import requests
 import time
+from datetime import date
 from collections import deque
 from insightface.app import FaceAnalysis
 
 THRESHOLD = 0.55
-SESSION_ID = 1
-API_URL = "http://127.0.0.1:8000/api/attendance/mark/"
+API_BASE = "http://127.0.0.1:8000/api"
 COOLDOWN_SECONDS = 10
 LIVENESS_WINDOW = 2.0
 MIN_MOVEMENT_PX = 2
 MIN_SAMPLES = 8
 LIVENESS_LOCK_SECONDS = 5.0
+
+def get_today_session():
+    """Fetch today's session automatically. If multiple exist, use the most recent."""
+    try:
+        response = requests.get(f"{API_BASE}/sessions/")
+        sessions = response.json()
+        today_str = str(date.today())
+
+        todays_sessions = [s for s in sessions if s['date'] == today_str]
+
+        if not todays_sessions:
+            print(f"No session found for today ({today_str}). Create one via the frontend first.")
+            return None
+
+        # use the most recently created one (highest id) if multiple exist today
+        chosen = max(todays_sessions, key=lambda s: s['id'])
+        print(f"Using session: '{chosen['name']}' (ID: {chosen['id']}, {chosen['date']})")
+        return chosen['id']
+
+    except requests.exceptions.ConnectionError:
+        print("Could not reach backend - is Django running?")
+        return None
 
 def load_model():
     app = FaceAnalysis(name='buffalo_l')
@@ -39,11 +61,11 @@ def find_best_match(embedding, db):
         return best_match, best_score
     return None, best_score
 
-def mark_attendance(roll_number):
+def mark_attendance(roll_number, session_id):
     try:
-        response = requests.post(API_URL, json={
+        response = requests.post(f"{API_BASE}/attendance/mark/", json={
             "roll_number": roll_number,
-            "session_id": SESSION_ID
+            "session_id": session_id
         })
         data = response.json()
         print(f"API response: {data.get('message', data)}")
@@ -59,13 +81,17 @@ def check_liveness(track_buffer):
     return movement >= MIN_MOVEMENT_PX, movement
 
 def run_live_recognition():
+    session_id = get_today_session()
+    if session_id is None:
+        return  # stop here, nothing to mark attendance against
+
     app = load_model()
     db = load_embeddings_db()
     cap = cv2.VideoCapture(0)
 
     last_marked = {}
     tracking = {}
-    liveness_confirmed = {}  # roll_number -> timestamp when liveness was confirmed
+    liveness_confirmed = {}
 
     print("Press 'q' to quit")
 
@@ -83,43 +109,37 @@ def run_live_recognition():
             match, score = find_best_match(face.embedding, db)
 
             if match:
-                # update tracking buffer
                 if match not in tracking:
                     tracking[match] = deque()
                 tracking[match].append((center[0], center[1], now))
 
-                # drop samples older than the liveness window
                 while tracking[match] and now - tracking[match][0][2] > LIVENESS_WINDOW:
                     tracking[match].popleft()
 
-                # check if liveness was already confirmed recently
                 already_confirmed = (
                     match in liveness_confirmed and
                     now - liveness_confirmed[match] < LIVENESS_LOCK_SECONDS
                 )
 
-                # run liveness check if not already confirmed
                 if not already_confirmed:
                     is_live, movement = check_liveness(tracking[match])
                     if is_live:
-                        liveness_confirmed[match] = now  # lock it in
+                        liveness_confirmed[match] = now
                         already_confirmed = True
 
                 if not already_confirmed:
                     label = f"{match} - verifying liveness..."
-                    color = (0, 165, 255)  # orange
+                    color = (0, 165, 255)
                 else:
                     label = f"{match} ({score:.2f}) LIVE"
-                    color = (0, 255, 0)  # green
+                    color = (0, 255, 0)
 
-                    # mark attendance if cooldown has passed
                     if match not in last_marked or (now - last_marked[match]) > COOLDOWN_SECONDS:
-                        mark_attendance(match)
+                        mark_attendance(match, session_id)
                         last_marked[match] = now
-
             else:
                 label = f"Unknown ({score:.2f})"
-                color = (0, 0, 255)  # red
+                color = (0, 0, 255)
 
             cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
             cv2.putText(frame, label, (box[0], box[1] - 10),

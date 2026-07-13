@@ -10,4 +10,5 @@ urlpatterns = [
     path('attendance/today/', views.today_summary, name='today-summary'),
     path('attendance/export/', views.export_attendance_csv, name='export-csv'),
     path('auth/login/', views.login_view, name='login'),
+    path('sessions/<int:pk>/', views.SessionDetailView.as_view(), name='session-detail'),
 ]

@@ -7,7 +7,6 @@ function SessionManagement({ onSessionSelect }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // form state
   const [name, setName] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [startTime, setStartTime] = useState('');
@@ -54,7 +53,6 @@ function SessionManagement({ onSessionSelect }) {
         setEndTime('');
         setSubmitting(false);
         fetchSessions();
-        // auto-select the newly created session
         setActiveSession(response.data);
         if (onSessionSelect) onSessionSelect(response.data);
       })
@@ -69,6 +67,26 @@ function SessionManagement({ onSessionSelect }) {
     if (onSessionSelect) onSessionSelect(session);
   };
 
+  const handleDelete = (e, session) => {
+    e.stopPropagation(); // prevent triggering handleSelect when clicking delete
+
+    if (!window.confirm(`Delete "${session.name}" (${session.date})? This cannot be undone.`)) {
+      return;
+    }
+
+    api.delete(`/sessions/${session.id}/`)
+      .then(() => {
+        fetchSessions();
+        if (activeSession?.id === session.id) {
+          setActiveSession(null);
+          if (onSessionSelect) onSessionSelect(null);
+        }
+      })
+      .catch(err => {
+        alert('Failed to delete session. It may have attendance records linked to it.');
+      });
+  };
+
   if (loading) return <div className="p-6">Loading sessions...</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;
 
@@ -76,7 +94,6 @@ function SessionManagement({ onSessionSelect }) {
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Session Management</h1>
 
-      {/* Create Session Form */}
       <div className="bg-white border rounded-lg p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Create New Session</h2>
         <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-3">
@@ -129,7 +146,6 @@ function SessionManagement({ onSessionSelect }) {
         </form>
       </div>
 
-      {/* Session List */}
       <h2 className="text-lg font-semibold mb-3">All Sessions</h2>
       <div className="space-y-2">
         {sessions.length === 0 && (
@@ -149,11 +165,19 @@ function SessionManagement({ onSessionSelect }) {
               <span className="font-semibold">{session.name}</span>
               <span className="text-gray-500 text-sm ml-2">{session.date}</span>
             </div>
-            <div className="text-sm text-gray-500">
-              {session.start_time} → {session.end_time}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-500">
+                {session.start_time} → {session.end_time}
+              </span>
               {activeSession?.id === session.id && (
-                <span className="ml-2 text-blue-600 font-semibold">● Active</span>
+                <span className="text-blue-600 font-semibold text-sm">● Active</span>
               )}
+              <button
+                onClick={(e) => handleDelete(e, session)}
+                className="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
