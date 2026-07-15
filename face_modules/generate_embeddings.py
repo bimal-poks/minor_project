@@ -4,12 +4,15 @@ import numpy as np
 import pickle
 from insightface.app import FaceAnalysis
 
+DATASET_DIR = "dataset/raw"
+TRAIN_COUNT = 3  # use first 3 photos for embedding, last 2 for testing
+
 def load_model():
     app = FaceAnalysis(name='buffalo_l')
     app.prepare(ctx_id=0, det_size=(640, 640))
     return app
 
-def generate_embeddings(app, dataset_dir="dataset/raw"):
+def generate_embeddings(app, dataset_dir=DATASET_DIR):
     embeddings_db = {}
 
     for roll_number in os.listdir(dataset_dir):
@@ -17,8 +20,17 @@ def generate_embeddings(app, dataset_dir="dataset/raw"):
         if not os.path.isdir(student_folder):
             continue
 
+        all_images = sorted([
+            f for f in os.listdir(student_folder)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+        ])
+
+        # use only first TRAIN_COUNT images for embedding
+        train_images = all_images[:TRAIN_COUNT]
+        print(f"{roll_number}: using {train_images} for embedding")
+
         student_embeddings = []
-        for filename in os.listdir(student_folder):
+        for filename in train_images:
             image_path = os.path.join(student_folder, filename)
             img = cv2.imread(image_path)
             if img is None:
@@ -28,12 +40,12 @@ def generate_embeddings(app, dataset_dir="dataset/raw"):
             if len(faces) == 1:
                 student_embeddings.append(faces[0].embedding)
             else:
-                print(f"Skipping {image_path}: {len(faces)} faces detected")
+                print(f"  Skipping {filename}: {len(faces)} faces detected")
 
         if student_embeddings:
             avg_embedding = np.mean(student_embeddings, axis=0)
             embeddings_db[roll_number] = avg_embedding
-            print(f"{roll_number}: embedding generated from {len(student_embeddings)} photo(s)")
+            print(f"  → Embedding generated from {len(student_embeddings)} photo(s)")
 
     return embeddings_db
 
@@ -46,3 +58,5 @@ if __name__ == "__main__":
         pickle.dump(db, f)
 
     print(f"\nSaved {len(db)} student embeddings to embeddings/face_db.pkl")
+    print(f"NOTE: Embeddings built from first {TRAIN_COUNT} photos only.")
+    print(f"Last 2 photos per student are held out for evaluation.")
